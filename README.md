@@ -17,6 +17,12 @@ Works on **Linux**, **macOS**, and **Windows** (MinGW / WSL recommended).
 pip install matplotlib numpy
 ```
 
+If `make` fails with a path like `/Users/.../print(1)/bin/python3` (`syntax error near unexpected token '('`), the Python path contains shell metacharacters. Pull the latest Makefile (paths are quoted), or force a normal interpreter:
+
+```bash
+make all-run PYTHON=/usr/bin/python3
+```
+
 ## Quick start
 
 ```bash

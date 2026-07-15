@@ -4,6 +4,7 @@ CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -pedantic
 # Metal host must use Apple clang (frameworks).
 CLANGXX ?= $(shell xcrun --find clang++ 2>/dev/null || command -v clang++ 2>/dev/null || echo clang++)
 # Prefer miniforge/conda Python (has matplotlib) over system /usr/bin/python3.
+# Quote $(PYTHON) in recipes: paths may contain spaces or shell metacharacters like '(', ')'.
 PYTHON ?= $(firstword \
 	$(wildcard $(HOME)/miniforge3/bin/python) \
 	$(wildcard $(HOME)/mambaforge/bin/python) \
@@ -21,7 +22,7 @@ $(TARGET): mountain.cpp
 	$(CXX) $(CXXFLAGS) mountain.cpp -o $(TARGET)
 
 host:
-	$(PYTHON) detect_host.py
+	"$(PYTHON)" detect_host.py
 
 run: $(TARGET)
 	mkdir -p output
@@ -33,13 +34,13 @@ run-float: $(TARGET)
 	./$(TARGET) --dtype float output/mountain_cpu_f32.csv
 
 plot: host
-	$(PYTHON) plot_mountain.py \
+	"$(PYTHON)" plot_mountain.py \
 		--csv output/mountain.csv \
 		--host output/host_info.json \
 		--out output/memory_mountain.png
 
 plot-float: host
-	$(PYTHON) plot_mountain.py \
+	"$(PYTHON)" plot_mountain.py \
 		--csv output/mountain_cpu_f32.csv \
 		--host output/host_info.json \
 		--out output/memory_mountain_cpu_f32.png
@@ -63,7 +64,7 @@ metal-run: metal
 	./$(TARGET_METAL) output/mountain_metal.csv
 
 metal-plot:
-	$(PYTHON) plot_mountain.py \
+	"$(PYTHON)" plot_mountain.py \
 		--csv output/mountain_metal.csv \
 		--host output/host_info_metal.json \
 		--out output/memory_mountain_metal.png
