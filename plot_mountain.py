@@ -84,20 +84,21 @@ def main():
     y = np.arange(len(strides))
     X, Y = np.meshgrid(x, y)
 
-    fig = plt.figure(figsize=(11.0, 5.2))
+    fig = plt.figure(figsize=(12.0, 5.6))
     ax3 = fig.add_subplot(1, 2, 1, projection="3d")
     surf = ax3.plot_surface(
         X, Y, z, cmap="viridis", edgecolor="none", alpha=0.95, antialiased=True
     )
-    fig.colorbar(surf, ax=ax3, shrink=0.7, pad=0.1, label="Read throughput (MB/s)")
+    fig.colorbar(surf, ax=ax3, shrink=0.7, pad=0.12, label="Read throughput (MB/s)")
 
     ax3.set_xticks(x[::2])
     ax3.set_xticklabels([_fmt_size(n) for n in sizes[::2]], rotation=20, ha="right", fontsize=7)
     ax3.set_yticks(y)
     ax3.set_yticklabels([f"s{s}" for s in strides], fontsize=7)
-    ax3.set_xlabel("Size (bytes)", labelpad=8)
-    ax3.set_ylabel(stride_label, labelpad=6)
-    ax3.set_zlabel("MB/s", labelpad=4)
+    ax3.set_xlabel("Size (bytes)", labelpad=10)
+    ax3.set_ylabel(stride_label, labelpad=8)
+    ax3.set_zlabel("MB/s", labelpad=12)
+    ax3.tick_params(axis="z", pad=6)
     ax3.set_title("Memory mountain (3D)")
     ax3.view_init(elev=25, azim=45)
     ax3.set_xlim(0, len(sizes) - 1)
@@ -114,10 +115,11 @@ def main():
     ax2.set_ylabel(stride_label)
     ax2.set_title("Same data (heatmap)")
 
-    fig.suptitle(host_title(args.host, args.csv), fontsize=10, y=1.02)
-    fig.subplots_adjust(left=0.04, right=0.96, wspace=0.28)
+    fig.suptitle(host_title(args.host, args.csv), fontsize=10, y=0.98)
+    # Leave room for 3D z-tick labels / z-axis label (were clipped on the left).
+    fig.subplots_adjust(left=0.08, right=0.96, bottom=0.12, top=0.88, wspace=0.32)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=220, bbox_inches="tight")
+    fig.savefig(args.out, dpi=220, bbox_inches="tight", pad_inches=0.35)
     plt.close(fig)
     print(f"wrote {args.out}")
 
