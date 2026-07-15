@@ -1,0 +1,16 @@
+{
+  "os": "macOS",
+  "cpu": "Apple M4 Pro",
+  "caches": {
+    "line": 128,
+    "L1d": 65536,
+    "L2": 4194304,
+    "L1d_P": 131072,
+    "L2_P": 16777216,
+    "L1d_E": 65536,
+    "L2_E": 4194304
+  },
+  "arch": "arm64",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "title": "Apple M4 Pro \u2014 P L1d 128 KiB; L2 16 MiB; E L1d 64 KiB; L2 4 MiB; line 128 B"
+}

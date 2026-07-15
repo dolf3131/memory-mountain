@@ -1,0 +1,19 @@
+# Build artifacts
+/mountain
+/mountain.exe
+*.o
+*.obj
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep measured outputs tracked as examples (CSV/PNG/JSON).
+# Uncomment below if you prefer not to commit large regenerations:
+# /output/mountain.csv
