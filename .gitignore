@@ -1,8 +1,11 @@
 # Build artifacts
 /mountain
 /mountain.exe
+/mountain_metal
 *.o
 *.obj
+*.air
+*.metallib
 
 # Python
 __pycache__/

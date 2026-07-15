@@ -29,7 +29,13 @@ def load(path: Path):
     for i, s in enumerate(strides):
         for j, n in enumerate(sizes):
             z[i, j] = lookup.get((n, s), np.nan)
-    return sizes, strides, z
+    elem_bytes = 8
+    if rows and "stride_bytes" in rows[0] and "stride_elems" in rows[0]:
+        se = int(rows[0]["stride_elems"])
+        sb = int(rows[0]["stride_bytes"])
+        if se > 0:
+            elem_bytes = sb // se
+    return sizes, strides, z, elem_bytes
 
 
 def _fmt_size(n: int) -> str:
@@ -44,7 +50,7 @@ def host_title(host_path: Path) -> str:
     if host_path.is_file():
         try:
             info = json.loads(host_path.read_text(encoding="utf-8"))
-            return info.get("title") or info.get("cpu") or "Memory mountain"
+            return info.get("title") or info.get("gpu") or info.get("cpu") or "Memory mountain"
         except (OSError, json.JSONDecodeError):
             pass
     return "Memory mountain"
@@ -57,7 +63,8 @@ def main():
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = ap.parse_args()
 
-    sizes, strides, z = load(args.csv)
+    sizes, strides, z, elem_bytes = load(args.csv)
+    stride_label = f"Stride (x{elem_bytes} bytes)"
     x = np.arange(len(sizes))
     y = np.arange(len(strides))
     X, Y = np.meshgrid(x, y)
@@ -74,7 +81,7 @@ def main():
     ax3.set_yticks(y)
     ax3.set_yticklabels([f"s{s}" for s in strides], fontsize=7)
     ax3.set_xlabel("Size (bytes)", labelpad=8)
-    ax3.set_ylabel("Stride (x8 bytes)", labelpad=6)
+    ax3.set_ylabel(stride_label, labelpad=6)
     ax3.set_zlabel("MB/s", labelpad=4)
     ax3.set_title("Memory mountain (3D)")
     ax3.view_init(elev=25, azim=45)
@@ -89,7 +96,7 @@ def main():
     ax2.set_yticks(range(len(strides)))
     ax2.set_yticklabels([f"s{s}" for s in strides], fontsize=8)
     ax2.set_xlabel("Working set size")
-    ax2.set_ylabel("Stride (x8 bytes)")
+    ax2.set_ylabel(stride_label)
     ax2.set_title("Same data (heatmap)")
 
     fig.suptitle(host_title(args.host), fontsize=10, y=1.02)

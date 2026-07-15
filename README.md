@@ -46,6 +46,27 @@ python3 detect_host.py
 python3 plot_mountain.py
 ```
 
+## Metal GPU (macOS / Apple Silicon)
+
+Same size × stride sweep on the **GPU** via Metal (shared/unified memory buffers).
+
+```bash
+make metal-all        # build → run → plot → output/memory_mountain_metal.png
+```
+
+| File | Description |
+|------|-------------|
+| `mountain.metal` | Compute kernel (`strided_read`) |
+| `mountain_metal.mm` | Host timing (`GPUStartTime` / `GPUEndTime`) |
+| `output/mountain_metal.csv` | GPU samples |
+| `output/memory_mountain_metal.png` | GPU figure |
+
+Notes:
+
+- Element type is `float` (4 B); plot stride axis is labeled `x4 bytes`.
+- Requires Xcode CLT (`xcrun clang++`) and a Metal device.
+- Apple Silicon GPU caches + unified memory make the surface look different from the CPU mountain; large-stride drops are still the main cliff.
+
 ## What you should see
 
 - **Small size + small stride** → high throughput (data fits in cache; good spatial locality).
@@ -57,11 +78,13 @@ Cache labels in the plot title come from `sysctl` (macOS), `/sys/devices/system/
 ## Repository layout
 
 ```
-mountain.cpp       # portable C++17 benchmark
-detect_host.py     # CPU / cache detection
-plot_mountain.py   # matplotlib 3D + heatmap
-Makefile           # make all-run
-output/            # CSV, host_info.json, figure (example included)
+mountain.cpp         # portable C++17 CPU benchmark
+mountain.metal       # Metal GPU kernel (macOS)
+mountain_metal.mm    # Metal host
+detect_host.py       # CPU / cache detection
+plot_mountain.py     # matplotlib 3D + heatmap
+Makefile             # make all-run / make metal-all
+output/              # CSV, host_info*.json, figures
 ```
 
 ## References
