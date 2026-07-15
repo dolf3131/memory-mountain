@@ -67,6 +67,27 @@ Notes:
 - Requires Xcode CLT (`xcrun clang++`) and a Metal device.
 - Apple Silicon GPU caches + unified memory make the surface look different from the CPU mountain; large-stride drops are still the main cliff.
 
+## Fair CPU ↔ GPU comparison
+
+Apple Metal kernels here use **`float`** (FP32). Comparing that to a CPU **`double`** mountain mixes element sizes (4 B vs 8 B), so stride-in-bytes and bytes/load differ.
+
+For an apples-to-apples plot, run both in FP32:
+
+```bash
+make compare-cpu-gpu
+# CPU float → output/memory_mountain_cpu_f32.png
+# GPU Metal → output/memory_mountain_metal.png
+```
+
+Or manually:
+
+```bash
+./mountain --dtype float output/mountain_cpu_f32.csv
+./mountain_metal output/mountain_metal.csv
+```
+
+Classic CSAPP-style CPU runs remain available with `--dtype double` (default in `make all-run`).
+
 ## What you should see
 
 - **Small size + small stride** → high throughput (data fits in cache; good spatial locality).

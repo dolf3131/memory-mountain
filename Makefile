@@ -13,7 +13,7 @@ PYTHON ?= $(firstword \
 TARGET = mountain
 TARGET_METAL = mountain_metal
 
-.PHONY: all host run plot all-run metal metal-run metal-plot metal-all clean
+.PHONY: all host run plot all-run run-float plot-float metal metal-run metal-plot metal-all compare-cpu-gpu clean
 
 all: $(TARGET)
 
@@ -25,10 +25,24 @@ host:
 
 run: $(TARGET)
 	mkdir -p output
-	./$(TARGET) output/mountain.csv
+	./$(TARGET) --dtype double output/mountain.csv
+
+# Same element type as Metal (float) for fair CPU↔GPU comparison
+run-float: $(TARGET)
+	mkdir -p output
+	./$(TARGET) --dtype float output/mountain_cpu_f32.csv
 
 plot: host
-	$(PYTHON) plot_mountain.py
+	$(PYTHON) plot_mountain.py \
+		--csv output/mountain.csv \
+		--host output/host_info.json \
+		--out output/memory_mountain.png
+
+plot-float: host
+	$(PYTHON) plot_mountain.py \
+		--csv output/mountain_cpu_f32.csv \
+		--host output/host_info.json \
+		--out output/memory_mountain_cpu_f32.png
 
 # One-shot: build → measure → detect host → plot
 all-run: all run plot
@@ -55,6 +69,13 @@ metal-plot:
 		--out output/memory_mountain_metal.png
 
 metal-all: metal-run metal-plot
+
+# Fair comparison: CPU float + Metal float (same dtype / stride-in-elements)
+compare-cpu-gpu: run-float plot-float metal-all
+	@echo ""
+	@echo "Compare (both float32):"
+	@echo "  CPU : output/memory_mountain_cpu_f32.png"
+	@echo "  GPU : output/memory_mountain_metal.png"
 
 clean:
 	rm -f $(TARGET) $(TARGET).exe $(TARGET_METAL)

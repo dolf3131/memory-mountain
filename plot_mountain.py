@@ -46,14 +46,29 @@ def _fmt_size(n: int) -> str:
     return str(n)
 
 
-def host_title(host_path: Path) -> str:
+def host_title(host_path: Path, csv_path: Path | None = None) -> str:
+    title = "Memory mountain"
     if host_path.is_file():
         try:
             info = json.loads(host_path.read_text(encoding="utf-8"))
-            return info.get("title") or info.get("gpu") or info.get("cpu") or "Memory mountain"
+            title = info.get("title") or info.get("gpu") or info.get("cpu") or title
         except (OSError, json.JSONDecodeError):
             pass
-    return "Memory mountain"
+    if csv_path and csv_path.is_file():
+        try:
+            rows = list(csv.DictReader(csv_path.open(newline="")))
+            if rows and "dtype" in rows[0] and rows[0]["dtype"]:
+                title = f"{title} [{rows[0]['dtype']}]"
+            elif rows and "stride_bytes" in rows[0] and "stride_elems" in rows[0]:
+                se = int(rows[0]["stride_elems"])
+                sb = int(rows[0]["stride_bytes"])
+                if se > 0 and sb // se == 4:
+                    title = f"{title} [float]"
+                elif se > 0 and sb // se == 8:
+                    title = f"{title} [double]"
+        except (OSError, ValueError, KeyError):
+            pass
+    return title
 
 
 def main():
@@ -99,7 +114,7 @@ def main():
     ax2.set_ylabel(stride_label)
     ax2.set_title("Same data (heatmap)")
 
-    fig.suptitle(host_title(args.host), fontsize=10, y=1.02)
+    fig.suptitle(host_title(args.host, args.csv), fontsize=10, y=1.02)
     fig.subplots_adjust(left=0.04, right=0.96, wspace=0.28)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=220, bbox_inches="tight")
