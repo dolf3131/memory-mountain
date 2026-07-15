@@ -97,9 +97,10 @@ def main():
     ax3.set_yticklabels([f"s{s}" for s in strides], fontsize=7)
     ax3.set_xlabel("Size (bytes)", labelpad=10)
     ax3.set_ylabel(stride_label, labelpad=8)
-    ax3.set_zlabel("MB/s", labelpad=12)
-    ax3.tick_params(axis="z", pad=6)
-    ax3.set_title("Memory mountain (3D)")
+    # Avoid clipped "MB/s" on the left of 3D axes; colorbar already carries the unit.
+    ax3.set_zlabel("")
+    ax3.tick_params(axis="z", pad=8)
+    ax3.set_title("Memory mountain (3D) — MB/s")
     ax3.view_init(elev=25, azim=45)
     ax3.set_xlim(0, len(sizes) - 1)
     ax3.set_ylim(0, len(strides) - 1)
@@ -116,10 +117,9 @@ def main():
     ax2.set_title("Same data (heatmap)")
 
     fig.suptitle(host_title(args.host, args.csv), fontsize=10, y=0.98)
-    # Leave room for 3D z-tick labels / z-axis label (were clipped on the left).
-    fig.subplots_adjust(left=0.08, right=0.96, bottom=0.12, top=0.88, wspace=0.32)
+    fig.subplots_adjust(left=0.06, right=0.96, bottom=0.12, top=0.88, wspace=0.30)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=220, bbox_inches="tight", pad_inches=0.35)
+    fig.savefig(args.out, dpi=220, bbox_inches="tight", pad_inches=0.25)
     plt.close(fig)
     print(f"wrote {args.out}")
 
