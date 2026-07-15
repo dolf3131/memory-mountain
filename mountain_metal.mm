@@ -191,13 +191,12 @@ int main(int argc, char** argv)
         out << "size_bytes,stride_elems,stride_bytes,throughput_MBps,seconds,reps,device\n";
 
         const uint32_t tg = static_cast<uint32_t>(pso.threadExecutionWidth);
-        uint32_t nthreads = g_threads;
-        nthreads = std::max(nthreads, tg);
-        nthreads = (nthreads / tg) * tg; // multiple of thread execution width
+        g_threads = std::max(g_threads, tg);
+        g_threads = (g_threads / tg) * tg;
 
         std::fprintf(stderr,
-                     "Metal mountain: sizes %zu..%zu, stride 1..%d (float), threads=%u\n",
-                     g_min_bytes, g_max_bytes, g_max_stride, nthreads);
+                     "Metal mountain: sizes %zu..%zu, stride 1..%d (float), max threads=%u\n",
+                     g_min_bytes, g_max_bytes, g_max_stride, g_threads);
 
         auto encode_and_time = [&](uint32_t n_elems, uint32_t stride, uint32_t reps) -> double {
             const uint32_t n_loads = (n_elems + stride - 1u) / stride;
