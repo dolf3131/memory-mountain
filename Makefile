@@ -14,7 +14,7 @@ PYTHON ?= $(firstword \
 TARGET = mountain
 TARGET_METAL = mountain_metal
 
-.PHONY: all host run plot all-run run-float plot-float metal metal-run metal-plot metal-all compare-cpu-gpu clean
+.PHONY: all host run run-classic plot all-run run-float plot-float metal metal-run metal-plot metal-all compare-cpu-gpu clean
 
 all: $(TARGET)
 
@@ -26,12 +26,17 @@ host:
 
 run: $(TARGET)
 	mkdir -p output
-	./$(TARGET) --dtype double output/mountain.csv
+	./$(TARGET) --mode auto --dtype double output/mountain.csv
+
+# Original power-of-two grid (no cache-aware densification)
+run-classic: $(TARGET)
+	mkdir -p output
+	./$(TARGET) --mode classic --dtype double output/mountain.csv
 
 # Same element type as Metal (float) for fair CPU↔GPU comparison
 run-float: $(TARGET)
 	mkdir -p output
-	./$(TARGET) --dtype float output/mountain_cpu_f32.csv
+	./$(TARGET) --mode auto --dtype float output/mountain_cpu_f32.csv
 
 plot: host
 	"$(PYTHON)" plot_mountain.py \

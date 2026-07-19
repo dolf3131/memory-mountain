@@ -28,20 +28,30 @@ make all-run PYTHON=/usr/bin/python3
 ```bash
 git clone https://github.com/dolf3131/memory-mountain.git
 cd memory-mountain
-make all-run          # build → run → detect host → plot
+make all-run          # build → auto cache-aware run → detect host → plot
 ```
+
+By default `./mountain` uses **`--mode auto`**: it detects the host cache hierarchy (macOS `sysctl`, Linux sysfs; Windows best-effort) and densifies the size×stride grid around L1/L2/(L3) so capacity and spatial-locality cliffs stand out. The heatmap marks those cache sizes.
 
 Artifacts:
 
 | File | Description |
 |------|-------------|
 | `output/mountain.csv` | Samples: size, stride, MB/s |
+| `output/sweep_meta.json` | Detected caches + auto size/stride schedule |
 | `output/host_info.json` | Auto-detected CPU / cache summary |
-| `output/memory_mountain.png` | 3D surface + heatmap |
+| `output/memory_mountain.png` | 3D surface + heatmap (with cache markers) |
 
 ## Options
 
 ```bash
+# Default: hardware-aware locality sweep
+./mountain output/mountain.csv --mode auto
+
+# Original power-of-two CSAPP-style grid
+./mountain output/mountain.csv --mode classic
+# or: make run-classic
+
 # Faster / lower-memory sweep
 ./mountain output/mountain.csv --max-bytes 33554432 --seconds 0.05
 
@@ -99,19 +109,20 @@ Classic CSAPP-style CPU runs remain available with `--dtype double` (default in 
 - **Small size + small stride** → high throughput (data fits in cache; good spatial locality).
 - **Large size + large stride** → lower throughput (DRAM-bound; prefetch helps less).
 - Modern CPUs with aggressive **hardware prefetch** often keep **unit-stride** bandwidth high even for large arrays; the “valley” is clearer at large strides.
+- In **`--mode auto`**, expect denser sampling near L1/L2/(L3) and dashed markers on the heatmap at those capacities.
 
-Cache labels in the plot title come from `sysctl` (macOS), `/sys/devices/system/cpu/.../cache` (Linux), or a best-effort CPU name (Windows). Missing levels are omitted.
+Cache labels in the plot title come from `sysctl` (macOS), `/sys/devices/system/cpu/.../cache` (Linux), or a best-effort CPU name (Windows). Missing levels are omitted. The binary itself also detects caches for the auto sweep (`output/sweep_meta.json`).
 
 ## Repository layout
 
 ```
-mountain.cpp         # portable C++17 CPU benchmark
+mountain.cpp         # portable C++17 CPU benchmark (--mode auto|classic)
 mountain.metal       # Metal GPU kernel (macOS)
 mountain_metal.mm    # Metal host
-detect_host.py       # CPU / cache detection
-plot_mountain.py     # matplotlib 3D + heatmap
+detect_host.py       # CPU / cache detection (plot titles)
+plot_mountain.py     # matplotlib 3D + heatmap + cache markers
 Makefile             # make all-run / make metal-all
-output/              # CSV, host_info*.json, figures
+output/              # CSV, sweep_meta.json, host_info*.json, figures
 ```
 
 ## References

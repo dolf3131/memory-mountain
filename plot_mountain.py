@@ -46,6 +46,54 @@ def _fmt_size(n: int) -> str:
     return str(n)
 
 
+def _fmt_bytes_label(n: int) -> str:
+    if n >= 1 << 20:
+        v = n / (1 << 20)
+        return f"{int(v)} MiB" if abs(v - int(v)) < 1e-9 else f"{v:.1f} MiB"
+    if n >= 1 << 10:
+        v = n / (1 << 10)
+        return f"{int(v)} KiB" if abs(v - int(v)) < 1e-9 else f"{v:.1f} KiB"
+    return f"{n} B"
+
+
+def load_cache_levels(host_path: Path, sweep_meta_path: Path | None = None) -> list[tuple[str, int]]:
+    """Return ordered (label, bytes) cache levels for vertical markers."""
+    caches: dict = {}
+    if sweep_meta_path and sweep_meta_path.is_file():
+        try:
+            meta = json.loads(sweep_meta_path.read_text(encoding="utf-8"))
+            caches = dict(meta.get("caches") or {})
+        except (OSError, json.JSONDecodeError):
+            caches = {}
+    if not caches and host_path.is_file():
+        try:
+            info = json.loads(host_path.read_text(encoding="utf-8"))
+            caches = dict(info.get("caches") or {})
+        except (OSError, json.JSONDecodeError):
+            caches = {}
+
+    levels: list[tuple[str, int]] = []
+    # Prefer P-core sizes on Apple Silicon when present.
+    if "L1d_P" in caches or caches.get("L1d"):
+        l1 = int(caches.get("L1d_P") or caches.get("L1d") or 0)
+        if l1 > 0:
+            levels.append(("L1d", l1))
+    if "L2_P" in caches or caches.get("L2"):
+        l2 = int(caches.get("L2_P") or caches.get("L2") or 0)
+        if l2 > 0:
+            levels.append(("L2", l2))
+    l3 = int(caches.get("L3") or 0)
+    if l3 >= (1 << 20):
+        levels.append(("L3", l3))
+    return levels
+
+
+def nearest_size_index(sizes: list[int], target: int) -> int | None:
+    if not sizes:
+        return None
+    return min(range(len(sizes)), key=lambda i: abs(sizes[i] - target))
+
+
 def host_title(host_path: Path, csv_path: Path | None = None) -> str:
     title = "Memory mountain"
     if host_path.is_file():
@@ -76,13 +124,30 @@ def main():
     ap.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     ap.add_argument("--host", type=Path, default=DEFAULT_HOST)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument(
+        "--sweep-meta",
+        type=Path,
+        default=None,
+        help="Optional sweep_meta.json from ./mountain (defaults beside --csv)",
+    )
     args = ap.parse_args()
 
     sizes, strides, z, elem_bytes = load(args.csv)
+    if not sizes or not strides:
+        raise SystemExit(f"no samples in {args.csv}; run ./mountain first")
+
+    sweep_meta = args.sweep_meta
+    if sweep_meta is None:
+        sweep_meta = args.csv.parent / "sweep_meta.json"
+    cache_levels = load_cache_levels(args.host, sweep_meta)
+
     stride_label = f"Stride (x{elem_bytes} bytes)"
     x = np.arange(len(sizes))
     y = np.arange(len(strides))
     X, Y = np.meshgrid(x, y)
+
+    # Dense auto grids: thin x tick labels.
+    tick_step = 2 if len(sizes) <= 24 else max(1, len(sizes) // 12)
 
     fig = plt.figure(figsize=(12.0, 5.6))
     ax3 = fig.add_subplot(1, 2, 1, projection="3d")
@@ -91,8 +156,10 @@ def main():
     )
     fig.colorbar(surf, ax=ax3, shrink=0.7, pad=0.12, label="Read throughput (MB/s)")
 
-    ax3.set_xticks(x[::2])
-    ax3.set_xticklabels([_fmt_size(n) for n in sizes[::2]], rotation=20, ha="right", fontsize=7)
+    ax3.set_xticks(x[::tick_step])
+    ax3.set_xticklabels(
+        [_fmt_size(n) for n in sizes[::tick_step]], rotation=20, ha="right", fontsize=7
+    )
     ax3.set_yticks(y)
     ax3.set_yticklabels([f"s{s}" for s in strides], fontsize=7)
     ax3.set_xlabel("Size (bytes)", labelpad=10)
@@ -108,13 +175,34 @@ def main():
     ax2 = fig.add_subplot(1, 2, 2)
     im = ax2.imshow(z, origin="lower", aspect="auto", cmap="viridis")
     fig.colorbar(im, ax=ax2, shrink=0.85, label="MB/s")
-    ax2.set_xticks(range(len(sizes)))
-    ax2.set_xticklabels([_fmt_size(n) for n in sizes], rotation=60, ha="right", fontsize=7)
+    ax2.set_xticks(range(0, len(sizes), tick_step))
+    ax2.set_xticklabels(
+        [_fmt_size(n) for n in sizes[::tick_step]], rotation=60, ha="right", fontsize=7
+    )
     ax2.set_yticks(range(len(strides)))
     ax2.set_yticklabels([f"s{s}" for s in strides], fontsize=8)
     ax2.set_xlabel("Working set size")
     ax2.set_ylabel(stride_label)
     ax2.set_title("Same data (heatmap)")
+
+    # Mark detected cache capacities so hierarchy cliffs are readable at a glance.
+    ymax = len(strides) - 0.5
+    for label, nbytes in cache_levels:
+        idx = nearest_size_index(sizes, nbytes)
+        if idx is None:
+            continue
+        ax2.axvline(idx, color="white", linestyle="--", linewidth=1.0, alpha=0.85)
+        ax2.text(
+            idx,
+            ymax - 0.15,
+            f"{label}\n{_fmt_bytes_label(nbytes)}",
+            color="white",
+            fontsize=7,
+            ha="center",
+            va="top",
+            linespacing=1.1,
+            bbox=dict(boxstyle="round,pad=0.15", fc="black", ec="none", alpha=0.35),
+        )
 
     fig.suptitle(host_title(args.host, args.csv), fontsize=10, y=0.98)
     fig.subplots_adjust(left=0.06, right=0.96, bottom=0.12, top=0.88, wspace=0.30)
