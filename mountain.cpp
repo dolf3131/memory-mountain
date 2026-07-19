@@ -27,6 +27,8 @@
 
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <unistd.h>
 #elif defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -60,6 +62,7 @@ volatile float g_sink_f = 0.0f;
 
 struct HostCaches {
     std::size_t line = 64;
+    std::size_t page = 4096; // VM page; used for stride horizon / TLB
     std::size_t l1d = 0;
     std::size_t l2 = 0;
     std::size_t l3 = 0;
@@ -151,8 +154,13 @@ HostCaches detect_caches()
         c.l3 = l3;
     }
     sysctl_size("hw.memsize", c.mem);
+    sysctl_size("hw.pagesize", c.page);
 #elif defined(__linux__)
     c.source = "sysfs";
+    {
+        const long p = sysconf(_SC_PAGESIZE);
+        if (p > 0) c.page = static_cast<std::size_t>(p);
+    }
     const std::string base = "/sys/devices/system/cpu/cpu0/cache";
     for (int idx = 0; idx < 16; ++idx) {
         const std::string dir = base + "/index" + std::to_string(idx);
@@ -190,25 +198,66 @@ HostCaches detect_caches()
         }
     }
 #elif defined(_WIN32)
-    c.source = "windows";
+    c.source = "win32";
     MEMORYSTATUSEX st{};
     st.dwLength = sizeof(st);
     if (GlobalMemoryStatusEx(&st)) {
         c.mem = static_cast<std::size_t>(st.ullTotalPhys);
     }
-    // Best-effort defaults when Win32 cache enumeration is unavailable.
-    c.l1d = 32u << 10;
-    c.l2 = 256u << 10;
-    c.l3 = 8u << 20;
-    c.line = 64;
+    {
+        SYSTEM_INFO si{};
+        GetSystemInfo(&si);
+        if (si.dwPageSize > 0) c.page = static_cast<std::size_t>(si.dwPageSize);
+    }
+
+    // Enumerate real L1d/L2/L3 via GetLogicalProcessorInformation (XP+).
+    // Size is per cache instance; for shared L3 that is the shareable domain
+    // capacity (what a single-threaded mountain cares about), not cores×size.
+    DWORD bytes = 0;
+    SetLastError(0);
+    const BOOL probe = GetLogicalProcessorInformation(nullptr, &bytes);
+    if (!probe && GetLastError() == ERROR_INSUFFICIENT_BUFFER && bytes > 0) {
+        std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> infos(
+            bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION) + 1);
+        bytes = static_cast<DWORD>(infos.size() * sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+        if (GetLogicalProcessorInformation(infos.data(), &bytes)) {
+            const std::size_t n = bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+            bool found = false;
+            for (std::size_t i = 0; i < n; ++i) {
+                if (infos[i].Relationship != RelationCache) continue;
+                const CACHE_DESCRIPTOR& cache = infos[i].Cache;
+                const std::size_t sz = static_cast<std::size_t>(cache.Size);
+                if (sz == 0) continue;
+                if (cache.LineSize > 0) {
+                    c.line = static_cast<std::size_t>(cache.LineSize);
+                }
+                // Instruction-only caches are irrelevant for the data mountain.
+                if (cache.Type != CacheData && cache.Type != CacheUnified) continue;
+                if (cache.Level == 1) {
+                    c.l1d = std::max(c.l1d, sz);
+                    found = true;
+                } else if (cache.Level == 2) {
+                    c.l2 = std::max(c.l2, sz);
+                    found = true;
+                } else if (cache.Level == 3) {
+                    c.l3 = std::max(c.l3, sz);
+                    found = true;
+                }
+            }
+            if (found) {
+                c.source = "win32/GetLogicalProcessorInformation";
+            }
+        }
+    }
 #else
     c.source = "fallback";
 #endif
 
     if (c.line == 0) c.line = 64;
+    if (c.page == 0) c.page = 4096;
     if (c.l1d == 0) c.l1d = 32u << 10;
     if (c.l2 == 0) c.l2 = 256u << 10;
-    // L3 optional.
+    // L3 optional — leave 0 when the platform has none / did not report one.
     return c;
 }
 
@@ -276,24 +325,29 @@ std::vector<std::size_t> build_size_schedule(const HostCaches& c)
 std::vector<int> build_stride_schedule(const HostCaches& c, std::size_t elem_bytes)
 {
     int max_stride = g_stride_set ? g_max_stride : 64;
+    const int line_elems =
+        std::max(1, static_cast<int>((c.line + elem_bytes - 1) / elem_bytes));
+    const int page_elems =
+        std::max(1, static_cast<int>(c.page / std::max<std::size_t>(elem_bytes, 1)));
+
     if (!g_stride_set && g_mode == Mode::Auto) {
-        // Cover from unit stride up to several cache lines and beyond, in elements.
-        const int line_elems =
-            std::max(1, static_cast<int>((c.line + elem_bytes - 1) / elem_bytes));
-        max_stride = std::max(64, line_elems * 16);
-        // Keep runtime sane on huge lines.
-        max_stride = std::min(max_stride, 512);
+        // No single "max hardware stride": once stride ≳ a few VM pages, the
+        // mountain is flat (and small sizes simply skip stride >= n).
+        // Host page size sets the TLB horizon — at least s1024, up to 4 pages.
+        max_stride = std::max({1024, page_elems * 4, line_elems * 32});
     }
 
     std::vector<int> strides;
     for (int s = 1; s <= max_stride; s *= 2) strides.push_back(s);
 
     if (g_mode == Mode::Auto) {
-        // Also sample "one element per cache line" and 2/4 lines — sharp spatial-locality edges.
-        const int line_elems =
-            std::max(1, static_cast<int>((c.line + elem_bytes - 1) / elem_bytes));
-        for (int m : {1, 2, 4, 8}) {
+        // Cache-line and page landmarks — sharp spatial-locality / TLB edges.
+        for (int m : {1, 2, 4, 8, 16}) {
             const int s = line_elems * m;
+            if (s > 1 && s <= max_stride) strides.push_back(s);
+        }
+        for (int m : {1, 2, 4}) {
+            const int s = page_elems * m;
             if (s > 1 && s <= max_stride) strides.push_back(s);
         }
         std::sort(strides.begin(), strides.end());
@@ -443,6 +497,7 @@ bool write_sweep_meta(const std::string& csv_path, const HostCaches& c,
     out << "  \"detect_source\": \"" << c.source << "\",\n";
     out << "  \"caches\": {\n";
     out << "    \"line\": " << c.line << ",\n";
+    out << "    \"page\": " << c.page << ",\n";
     out << "    \"L1d\": " << c.l1d << ",\n";
     out << "    \"L2\": " << c.l2 << ",\n";
     out << "    \"L3\": " << c.l3 << ",\n";
@@ -501,8 +556,9 @@ int run_mountain(const std::string& out_path, const HostCaches& caches)
                  "~%.3fs/sample\n",
                  dtype_name, mode_name, sizes.size(), sizes.front(), sizes.back(), strides.size(),
                  g_target_seconds);
-    std::fprintf(stderr, "  caches(%s): line=%zu L1d=%zu L2=%zu L3=%zu\n", caches.source.c_str(),
-                 caches.line, caches.l1d, caches.l2, caches.l3);
+    std::fprintf(stderr, "  caches(%s): line=%zu page=%zu L1d=%zu L2=%zu L3=%zu\n",
+                 caches.source.c_str(), caches.line, caches.page, caches.l1d, caches.l2,
+                 caches.l3);
 
     write_sweep_meta(out_path, caches, sizes, strides, dtype_name);
 

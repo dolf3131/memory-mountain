@@ -117,9 +117,92 @@ def detect_linux() -> dict:
     return info
 
 
+def _windows_caches_glpi() -> dict[str, int]:
+    """Read L1d/L2/L3 via GetLogicalProcessorInformation (same source as mountain.cpp)."""
+    if sys.platform != "win32":
+        return {}
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return {}
+
+    class CACHE_DESCRIPTOR(ctypes.Structure):
+        _fields_ = [
+            ("Level", ctypes.c_ubyte),
+            ("Associativity", ctypes.c_ubyte),
+            ("LineSize", ctypes.c_ushort),
+            ("Size", ctypes.c_ulong),
+            ("Type", ctypes.c_int),
+        ]
+
+    class _SLPI_UNION(ctypes.Union):
+        _fields_ = [
+            ("Cache", CACHE_DESCRIPTOR),
+            ("Reserved", ctypes.c_ulonglong * 2),
+        ]
+
+    ulong_ptr = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
+
+    class SYSTEM_LOGICAL_PROCESSOR_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("ProcessorMask", ulong_ptr),
+            ("Relationship", ctypes.c_int),
+            ("u", _SLPI_UNION),
+        ]
+
+    RelationCache = 2
+    CacheUnified = 0
+    CacheData = 2
+    ERROR_INSUFFICIENT_BUFFER = 122
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    glpi = kernel32.GetLogicalProcessorInformation
+    glpi.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
+    glpi.restype = wintypes.BOOL
+
+    needed = wintypes.DWORD(0)
+    if glpi(None, ctypes.byref(needed)):
+        return {}
+    if ctypes.get_last_error() != ERROR_INSUFFICIENT_BUFFER or needed.value == 0:
+        return {}
+
+    entry = SYSTEM_LOGICAL_PROCESSOR_INFORMATION
+    entry_size = ctypes.sizeof(entry)
+    count = max(1, (needed.value + entry_size - 1) // entry_size)
+    arr_t = entry * count
+    arr = arr_t()
+    buf_bytes = wintypes.DWORD(count * entry_size)
+    if not glpi(ctypes.byref(arr), ctypes.byref(buf_bytes)):
+        return {}
+
+    n = buf_bytes.value // entry_size
+    caches: dict[str, int] = {}
+    for i in range(n):
+        item = arr[i]
+        if item.Relationship != RelationCache:
+            continue
+        cache = item.u.Cache
+        sz = int(cache.Size)
+        if sz <= 0:
+            continue
+        if int(cache.LineSize) > 0:
+            caches["line"] = int(cache.LineSize)
+        if int(cache.Type) not in (CacheData, CacheUnified):
+            continue
+        level = int(cache.Level)
+        if level == 1:
+            caches["L1d"] = max(caches.get("L1d", 0), sz)
+        elif level == 2:
+            caches["L2"] = max(caches.get("L2", 0), sz)
+        elif level == 3:
+            caches["L3"] = max(caches.get("L3", 0), sz)
+    return {k: v for k, v in caches.items() if v > 0}
+
+
 def detect_windows() -> dict:
     info: dict = {"os": "Windows", "cpu": platform.processor() or "CPU", "caches": {}}
-    # Best-effort via WMIC / PowerShell if available.
+    # Best-effort via PowerShell if available.
     out = _run(
         [
             "powershell",
@@ -130,6 +213,10 @@ def detect_windows() -> dict:
     )
     if out:
         info["cpu"] = out.splitlines()[0].strip()
+
+    caches = _windows_caches_glpi()
+    if caches:
+        info["caches"] = caches
     return info
 
 
